@@ -323,8 +323,9 @@ Private Sub buildBlock()
                 boolStartedReading = False
                 If boolSpansPages = False Then
                     Call Copy_Template(StoreNo)
-                    Call write_data
-                    Call Transfer_Invoices(StoreNo)
+                    'Call write_data
+                    Call writeMultiplePages
+                    'Call Transfer_Invoices(StoreNo)
                     Call eraseSmallArrays
                 End If
                 lCurrentProcessingPosition = 0
@@ -401,53 +402,52 @@ Private Function valuePresent(strInput As String) As Boolean
     If Not IsNull(strInput) Then valuePresent = True
 End Function
 
-Private Function write_data() As Long
-    Dim lArrayLength As Long
-    Dim i As Long
+Private Sub writeProductLine(lineNumber As Long, arrayNumber As Long)
+        DestWS.Range("A" & lineNumber + 15).Value = ProductCode(arrayNumber)
+        DestWS.Range("C" & lineNumber + 15).Value = ProductDescription(arrayNumber)
+        DestWS.Range("G" & lineNumber + 15).Value = PackSize(arrayNumber)
+        DestWS.Range("H" & lineNumber + 15).Value = QtyDelivered(arrayNumber)
+        DestWS.Range("I" & lineNumber + 15).Value = Price(arrayNumber)
+        DestWS.Range("J" & lineNumber + 15).Value = Ammount(arrayNumber)
+        DestWS.Range("K" & lineNumber + 15).Value = VAT(arrayNumber)
+End Sub
+
+'Work out the required number of pages.
+Private Function getTotalPageCount(Optional productsPerPage As Long = 46) As Long
+    Dim pageCount As Double
+    Dim totalProducts As Long
+
+    totalProducts = Checks.GetArrayLength(ProductCode)
     
-    DestWS.Range("J2").Value = PageNo
-    DestWS.Range("J5").Value = InvoiceNo
-    DestWS.Range("J8").Value = StoreNo
-    For i = 0 To 4
-        DestWS.Cells(i + 7, 1).Value = ClientAddress(i)
-        DestWS.Cells(i + 7, 5).Value = SenderAddress(i)
-    Next i
-    DestWS.Range("J11").Value = InvoiceDate
-    DestWS.Range("A14").Value = CustomerOrder
-    DestWS.Range("C14").Value = OrderDate
-    DestWS.Range("G14").Value = DispatchDate
-    DebugText.PrintText "Writing Product List."
+    pageCount = totalProducts / productsPerPage
+    If pageCount - Int(pageCount) <> 0 Then
+        pageCount = Round(pageCount + 0.5)
+    End If
     
-    lArrayLength = Checks.GetArrayLength(ProductCode)
+    getTotalPageCount = pageCount
+End Function
+
+'Write data across multiple spanning pages.
+Private Sub writeMultiplePages()
+    Dim currentArrayPosition As Long
+    Dim productArrayStartingPosition As Long
+    Dim remainingProducts As Long
+    Dim lastPageProcessed As Boolean
+    Dim pageStartPosition As Long
+    Dim pageNumber As Long
+
+    pageNumber = 1
+    pageStartPosition = 1
+    remainingProducts = Checks.GetArrayLength(ProductCode) - currentArrayPosition
     
-    For i = 0 To lArrayLength
-        DestWS.Range("A" & i + 16).Value = ProductCode(i)
-        DestWS.Range("C" & i + 16).Value = ProductDescription(i)
-        DestWS.Range("G" & i + 16).Value = PackSize(i)
-        DestWS.Range("H" & i + 16).Value = QtyDelivered(i)
-        DestWS.Range("I" & i + 16).Value = Price(i)
-        DestWS.Range("J" & i + 16).Value = Ammount(i)
-        DestWS.Range("K" & i + 16).Value = VAT(i)
-    Next i
-    DestWS.Range("A62").Value = TotalCases
-    DestWS.Range("A63").Value = RouteDrop
-    DestWS.Range("A66").Value = SLAccountNo
-    For i = 0 To 2
-        If GrossTotal(i) > 0 Then
-            DestWS.Range("G" & i + 64).Value = VATBands(i)
-            DestWS.Range("I" & i + 64).Value = GrossTotal(i)
-            DestWS.Range("J" & i + 64).Value = VATTotal(i)
-            DestWS.Range("K" & i + 64).Value = NETTotal(i)
-        Else
-            DestWS.Range("G" & i + 64).Value = ""
-            DestWS.Range("I" & i + 64).Value = ""
-            DestWS.Range("J" & i + 64).Value = ""
-            DestWS.Range("K" & i + 64).Value = ""
-        End If
-    Next i
-    DestWS.Range("I67").Value = GrossTotal(3)
-    DestWS.Range("J67").Value = VATTotal(3)
-    DestWS.Range("K67").Value = NETTotal(3)
+    While Not lastPageProcessed
+        'Set the page up.
+        'Enter the Data.
+        lastPageProcessed = write_data(pageNumber, pageStartPosition, productArrayStartingPosition)
+        pageStartPosition = pageStartPosition + 70
+        productArrayStartingPosition = productArrayStartingPosition + 46
+        pageNumber = pageNumber + 1
+    Wend
     
     Set DestWS = Nothing
     For i = 0 To 2
@@ -459,6 +459,83 @@ Private Function write_data() As Long
     GrossTotal(3) = 0
     VATTotal(3) = 0
     NETTotal(3) = 0
+End Sub
+
+'Write the data to the sheet.
+'Each sheet can hold 46 lines of products.
+Private Function write_data(pageNumber As Long, startingPosition As Long, arrayStartingPosition As Long) As Boolean
+    Dim currentOutputPosition As Long
+    Dim productArrayStartPosition As Long
+    Dim remainingProducts As Long
+    Dim i As Long, a As Long, b As Long
+    Dim tempLine As Long
+    Dim maxPages As Long
+    
+    maxPages = getTotalPageCount()
+    
+    currentOutputPosition = startingPosition
+    remainingProducts = Checks.GetArrayLength(ProductCode) - arrayStartingPosition
+    If remainingProducts <= 46 Then write_data = True
+        
+    'Setup the sheet header, Step 1 - Numbers
+    DestWS.Range("J" & currentOutputPosition + 1).Value = pageNumber & " of " & maxPages    'First page example J2
+    DestWS.Range("J" & currentOutputPosition + 4).Value = InvoiceNo                         'First page example J5
+    DestWS.Range("J" & currentOutputPosition + 7).Value = StoreNo                           'First page example J8
+    
+    'Step 2 - Addresses
+    For i = 0 To 4
+        DestWS.Cells(currentOutputPosition + i + 6, 1).Value = ClientAddress(i)
+        DestWS.Cells(currentOutputPosition + i + 6, 5).Value = SenderAddress(i)
+    Next i
+    
+    'Step 3 - Dates + Order Number
+    DestWS.Range("J" & currentOutputPosition + 10).Value = InvoiceDate      'First page example J11
+    DestWS.Range("A" & currentOutputPosition + 13).Value = CustomerOrder    'First page example A14
+    DestWS.Range("C" & currentOutputPosition + 13).Value = OrderDate        'First page example C14
+    DestWS.Range("G" & currentOutputPosition + 13).Value = DispatchDate     'First page example G14
+    DebugText.PrintText "Writing Product List."
+    
+    lArrayLength = Checks.GetArrayLength(ProductCode)
+    
+    'Step 4 - Write the products to the product line
+    If remainingProducts > 46 Then
+        b = arrayStartingPosition + 45
+    Else
+        b = lArrayLength
+    End If
+    
+    a = arrayStartingPosition
+    tempLine = 0 + startingPosition
+    
+    For i = a To b
+        writeProductLine tempLine, i
+        tempLine = tempLine + 1
+    Next i
+    
+    'Step 5 - Write sheet totals to the sheet
+    DestWS.Range("A" & currentOutputPosition + 61).Value = TotalCases
+    DestWS.Range("A" & currentOutputPosition + 62).Value = RouteDrop
+    DestWS.Range("A" & currentOutputPosition + 65).Value = SLAccountNo
+    For i = 0 To 2
+        If GrossTotal(i) > 0 Then
+            DestWS.Range("G" & currentOutputPosition & i + 64).Value = VATBands(i)
+            DestWS.Range("I" & currentOutputPosition & i + 64).Value = GrossTotal(i)
+            DestWS.Range("J" & currentOutputPosition & i + 64).Value = VATTotal(i)
+            DestWS.Range("K" & currentOutputPosition & i + 64).Value = NETTotal(i)
+        Else
+            DestWS.Range("G" & currentOutputPosition & i + 64).Value = ""
+            DestWS.Range("I" & currentOutputPosition & i + 64).Value = ""
+            DestWS.Range("J" & currentOutputPosition & i + 64).Value = ""
+            DestWS.Range("K" & currentOutputPosition & i + 64).Value = ""
+        End If
+    Next i
+    
+    'Step 6 - Write Grand totals to the last sheet.
+    DestWS.Range("I" & currentOutputPosition + 66).Value = GrossTotal(3)
+    DestWS.Range("J" & currentOutputPosition + 66).Value = VATTotal(3)
+    DestWS.Range("K" & currentOutputPosition + 66).Value = NETTotal(3)
+        
+    'Step 7 - Reset all previous arrays.
 End Function
 
 Private Function Transfer_Invoices(tabName As String) As Long
